@@ -1,8 +1,63 @@
-/*
+/* Batch Preview Modal */
+.batch-list-container {
+    max-height: 400px;
+    overflow-y: auto;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.batch-row {
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
 
-If your plugin does not need CSS, delete this file.
+.batch-details {
+    flex: 1;
+    margin-left: 10px;
+}
 
-*/
+.batch-name {
+    font-weight: bold;
+}
+
+.batch-dest {
+    color: var(--text-accent);
+}
+
+.batch-reason {
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.button-container {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* Recommendation Modal */
+.recommendation-primary, .recommendation-alt {
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+}
+
+.recommendation-primary {
+    background-color: var(--background-primary-alt);
+}
+
+.confidence-green { color: var(--color-green); }
+.confidence-yellow { color: var(--color-yellow); }
+.confidence-red { color: var(--color-red); }
+
+/* Analysis Panel */
+.vault-stats {
+    margin-bottom: 20px;
+}
+
+.issue-high { color: var(--color-red); }
+.issue-medium { color: var(--color-yellow); }
+.issue-low { color: var(--text-muted); }
