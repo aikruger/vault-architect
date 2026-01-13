@@ -121,4 +121,27 @@ export class VaultScanner {
       }
     });
   }
+
+  getAllFolders(): { name: string; path: string; level: number }[] {
+    const folders: { name: string; path: string; level: number }[] = [];
+    const root = this.app.vault.getRoot();
+
+    const walk = (folder: TFolder) => {
+      for (const child of folder.children) {
+        if (child instanceof TFolder) {
+           if (this.shouldExcludeFolder(child.path)) continue;
+
+           folders.push({
+             name: child.name,
+             path: child.path,
+             level: child.path.split('/').length - 1
+           });
+           walk(child);
+        }
+      }
+    };
+
+    walk(root);
+    return folders.sort((a, b) => a.path.localeCompare(b.path));
+  }
 }

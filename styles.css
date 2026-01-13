@@ -61,3 +61,88 @@
 .issue-high { color: var(--color-red); }
 .issue-medium { color: var(--color-yellow); }
 .issue-low { color: var(--text-muted); }
+
+/* Feature 1.1: User Context Input Modal */
+.context-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-family: monospace;
+  resize: vertical;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.context-input::placeholder {
+  color: var(--text-muted);
+}
+
+.modal-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-buttons button {
+  flex: 1;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+
+/* Feature 1.2: Folder Selection & Search */
+.folder-search-input {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+}
+
+.folder-list-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 8px;
+  background-color: var(--background-secondary);
+}
+
+.folder-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  margin: 2px 0;
+  border-radius: 3px;
+  background-color: var(--background-tertiary);
+}
+
+.folder-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.folder-item span {
+  flex: 1;
+  font-size: 0.9em;
+  font-family: monospace;
+}
+
+.button-small {
+  padding: 4px 12px;
+  font-size: 0.85em;
+}
