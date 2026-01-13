@@ -44,8 +44,44 @@ export class VaultScanner {
 
     // Create folder profile
     let coherenceScore = 0.7;
+    let folderCentroid: number[] | undefined = undefined;
+    let hasValidCentroid = false;
+
     if (this.settings.useSmartConnectionsIfAvailable && this.smartConnectionsService.isAvailable()) {
          coherenceScore = await this.smartConnectionsService.calculateCoherence(files);
+
+         // Calculate folder centroid (average embedding)
+        try {
+            if (files.length > 0) {
+                const embeddings: number[][] = [];
+                for (const noteFile of files) {
+                    try {
+                        const embedding = await this.smartConnectionsService.getNoteEmbedding(noteFile);
+                        if (embedding && embedding.length > 0) {
+                            embeddings.push(embedding);
+                        }
+                    } catch (e) {
+                         continue;
+                    }
+                }
+
+                if (embeddings.length > 0 && embeddings[0]) {
+                    // Calculate centroid
+                    const dim = embeddings[0].length;
+                    const centroid = new Array(dim).fill(0);
+                    for (let i = 0; i < dim; i++) {
+                        for (const emb of embeddings) {
+                            centroid[i] += (emb[i] || 0);
+                        }
+                        centroid[i] /= embeddings.length;
+                    }
+                    folderCentroid = centroid;
+                    hasValidCentroid = true;
+                }
+            }
+         } catch (error) {
+             console.error('Error calculating centroid for ' + folder.path + ':', error);
+         }
     }
 
     const profile: FolderProfile = {
@@ -57,6 +93,8 @@ export class VaultScanner {
       description: folderNote?.description || this.generateDescription(folder, files),
       folderNote,
       coherenceScore: coherenceScore,
+      folderCentroid: folderCentroid,
+      hasValidCentroid: hasValidCentroid,
       examples: files.slice(0, 3).map(f => f.basename)
     };
 

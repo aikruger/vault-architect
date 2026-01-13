@@ -68,6 +68,8 @@ export interface FolderProfile {
   description: string;
   folderNote: FolderNoteContent | null;
   embeddings?: Vector;
+  folderCentroid?: Vector;     // Average embedding of all notes
+  hasValidCentroid?: boolean;
   coherenceScore: number;      // 0-1, how similar notes are within folder
   examples: string[];          // Sample note titles
 }
@@ -83,6 +85,8 @@ export interface FolderRecommendation {
   reasoning: string;
   matchedTopics: string[];
   matchStrength: 'strong' | 'moderate' | 'weak';
+  similarity?: number;
+  enhancedConfidence?: number;
 }
 
 export interface RecommendationResult {

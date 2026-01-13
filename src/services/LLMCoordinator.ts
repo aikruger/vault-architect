@@ -1,3 +1,4 @@
+import { App, TFile } from 'obsidian';
 import {
   PluginSettings,
   CurrentNote,
@@ -15,14 +16,15 @@ import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../constant
 export class LLMCoordinator {
   private openaiAdapter: OpenAIAdapter;
 
-  constructor(private settings: PluginSettings) {
+  constructor(private app: App, private settings: PluginSettings) {
     this.openaiAdapter = new OpenAIAdapter(settings);
   }
 
   async recommendFolder(
     noteData: CurrentNote,
     folderProfiles: FolderProfile[],
-    userContext: string = ""
+    userContext: string = "",
+    currentFileEmbedding?: number[]
   ): Promise<RecommendationResult> {
     const startTime = Date.now();
 
@@ -47,10 +49,110 @@ export class LLMCoordinator {
     // Parse response
     const result = this.parseRecommendationResponse(response.content, folderProfiles);
 
+    // Enhance with embedding scores if available
+    if (currentFileEmbedding && currentFileEmbedding.length > 0) {
+        await this.scoreRecommendationsWithEmbeddings(result, currentFileEmbedding, folderProfiles);
+    }
+
     result.analysisMetadata.processingTime = Date.now() - startTime;
     result.analysisMetadata.tokensUsed = response.tokensUsed;
 
     return result;
+  }
+
+  // Blend LLM confidence with embedding similarity
+  blendConfidenceScores(llmConfidence: number, similarity: number, coherence: number): number {
+    // Coherence acts as weight: higher coherence = trust embeddings more
+    const embedWeight = coherence;
+    const llmWeight = 1 - coherence;
+
+    const blended = (llmConfidence * llmWeight) + (similarity * embedWeight);
+
+    // Clamp to 0-1
+    return Math.max(0, Math.min(1, blended));
+  }
+
+  // Score recommendations using embeddings
+  async scoreRecommendationsWithEmbeddings(recommendations: RecommendationResult, currentFileEmbedding: number[], folderProfiles: FolderProfile[]) {
+    if (!currentFileEmbedding || !folderProfiles) {
+      return recommendations;
+    }
+
+    const processRec = (rec: FolderRecommendation) => {
+        try {
+            const folderData = folderProfiles.find(f => f.folderPath === rec.folderPath);
+
+            if (!folderData || !folderData.hasValidCentroid || !folderData.folderCentroid) {
+                rec.similarity = 0.5; // Default if no centroid
+                rec.enhancedConfidence = rec.confidence;
+                return;
+            }
+
+            // Calculate cosine similarity to folder centroid
+            const similarity = this.cosineSimilarity(
+                currentFileEmbedding,
+                folderData.folderCentroid
+            );
+
+            rec.similarity = similarity;
+
+            // Blend confidence with similarity using coherence as weight
+            const coherence = folderData.coherenceScore || 0.5;
+            // Convert confidence to 0-1 for blending
+            const llmConf = rec.confidence / 100;
+
+            const blended = this.blendConfidenceScores(
+                llmConf,
+                similarity,
+                coherence
+            );
+
+            rec.enhancedConfidence = Math.round(blended * 100);
+
+        } catch (error) {
+            console.error('Error scoring recommendation for ' + rec.folderName + ':', error);
+            rec.similarity = 0.5;
+            rec.enhancedConfidence = rec.confidence;
+        }
+    }
+
+    if (recommendations.primaryRecommendation) {
+        processRec(recommendations.primaryRecommendation);
+    }
+
+    if (recommendations.alternatives) {
+        recommendations.alternatives.forEach(processRec);
+    }
+
+    return recommendations;
+  }
+
+  // Cosine similarity between two vectors
+  cosineSimilarity(vec1: number[], vec2: number[]): number {
+    if (!vec1 || !vec2 || vec1.length !== vec2.length) {
+      return 0;
+    }
+
+    let dotProduct = 0;
+    let mag1 = 0;
+    let mag2 = 0;
+
+    for (let i = 0; i < vec1.length; i++) {
+      const v1 = vec1[i] || 0;
+      const v2 = vec2[i] || 0;
+      dotProduct += v1 * v2;
+      mag1 += v1 * v1;
+      mag2 += v2 * v2;
+    }
+
+    mag1 = Math.sqrt(mag1);
+    mag2 = Math.sqrt(mag2);
+
+    if (mag1 === 0 || mag2 === 0) {
+      return 0;
+    }
+
+    return dotProduct / (mag1 * mag2);
   }
 
   async analyzeVault(folderProfiles: FolderProfile[]): Promise<VaultAnalysisReport> {
@@ -94,6 +196,57 @@ Generate a comprehensive Folder Note content (Markdown) including:
     });
 
     return response.content;
+  }
+
+  async generateFolderNames(file: TFile, userContext: string, topFolders: FolderRecommendation[] = []): Promise<string[]> {
+    try {
+      const fileContent = await this.app.vault.read(file);
+      const topFoldersList = topFolders
+        .slice(0, 5)
+        .map(f => f.folderName)
+        .join(', ');
+
+      const prompt = `Based on this file content and the user context, suggest 3 new folder names where this file could be organized.
+
+File: ${file.name}
+Content preview: ${fileContent.substring(0, 500)}...
+User context: ${userContext || 'None provided'}
+Most likely folders: ${topFoldersList || 'None'}
+
+Requirements:
+1. Names should be concise (1-3 words)
+2. Should reflect the file content
+3. Should follow existing vault naming conventions
+4. First suggestion should be the best match
+5. Use PascalCase for consistency
+
+Format your response as JSON array with exactly 3 suggestions:
+["Suggestion1", "Suggestion2", "Suggestion3"]
+
+Only return the JSON array, no other text.`;
+
+      const messages: ChatMessage[] = [{ role: 'user', content: prompt }];
+
+      const response = await this.openaiAdapter.call(messages, {
+          model: this.settings.openaiModel, // Use configured model
+          temperature: 0.7,
+          maxTokens: 500
+      });
+
+      // Parse JSON response
+      const match = response.content.match(/\["[^"]*"(?:,\s*"[^"]*")*\]/);
+      if (!match) {
+        console.warn('Failed to parse folder suggestions:', response.content);
+        return ['NewFolder1', 'NewFolder2', 'NewFolder3'];
+      }
+
+      const suggestions = JSON.parse(match[0]);
+      return suggestions.slice(0, 3); // Ensure max 3
+
+    } catch (error) {
+      console.error('Error generating folder names:', error);
+      return ['NewFolder1', 'NewFolder2', 'NewFolder3'];
+    }
   }
 
   // ============================================

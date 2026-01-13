@@ -4,10 +4,41 @@ import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../constant
 
 export class VaultArchitectSettings extends PluginSettingTab {
     plugin: VaultArchitectPlugin;
+    saveTimeout: any = null;
 
     constructor(app: App, plugin: VaultArchitectPlugin) {
         super(app, plugin);
         this.plugin = plugin;
+    }
+
+    updateStatusDisplay(status: any) {
+        const dot = document.getElementById('sc-status-dot');
+        const text = document.getElementById('sc-status-text');
+        const list = document.getElementById('sc-feature-list');
+
+        if (!dot || !text || !list) return;
+
+        // Update dot color
+        dot.classList.remove('connected', 'disconnected');
+        dot.classList.add(status.connected ? 'connected' : 'disconnected');
+
+        // Update status text
+        text.innerHTML = status.connected
+            ? '<span class="status-check">✓</span> ' + status.message
+            : '<span class="status-x">✗</span> ' + status.message;
+
+        // Update feature list
+        list.innerHTML = '';
+        if (status.features && status.features.length > 0) {
+            status.features.forEach((feature: string) => {
+                const item = list.createDiv('feature-item');
+                item.innerHTML = '✓ ' + feature;
+            });
+        } else {
+            const item = list.createDiv('feature-item');
+            item.innerHTML = '<em>No features available</em>';
+            item.style.color = 'var(--color-text-secondary)';
+        }
     }
 
     display(): void {
@@ -76,6 +107,57 @@ export class VaultArchitectSettings extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        // Smart Connections Status Section
+        containerEl.createEl('h3', {
+            text: 'Smart Connections Status',
+            cls: 'setting-heading'
+        });
+
+        const statusSection = containerEl.createDiv('sc-status-section');
+
+        // Status indicator row
+        const statusRow = statusSection.createDiv('status-indicator-row');
+
+        // Status dot
+        const statusDot = statusRow.createDiv('status-dot');
+        statusDot.id = 'sc-status-dot';
+
+        // Status text
+        const statusText = statusRow.createDiv('status-text');
+        statusText.id = 'sc-status-text';
+
+        // Feature availability section
+        const featureSection = statusSection.createDiv('feature-availability');
+        featureSection.createEl('h4', {
+            text: 'Available Features:'
+        });
+
+        const featureList = featureSection.createDiv('feature-list');
+        featureList.id = 'sc-feature-list';
+
+        // Check Status button
+        new Setting(statusSection)
+            .addButton((button) => {
+                button
+                    .setButtonText('Check Status')
+                    .setCta()
+                    .onClick(async () => {
+                        // @ts-ignore
+                        const status = await this.plugin.smartConnectionsService.getConnectionStatus();
+                        this.updateStatusDisplay(status);
+                    });
+            });
+
+        // Initial status check
+        setTimeout(() => {
+            // @ts-ignore
+            if (this.plugin.smartConnectionsService) {
+                // @ts-ignore
+                this.plugin.smartConnectionsService.getConnectionStatus()
+                    .then((status: any) => this.updateStatusDisplay(status));
+            }
+        }, 0);
+
         new Setting(containerEl).setName('Content analysis').setHeading();
 
          new Setting(containerEl)
@@ -127,40 +209,56 @@ export class VaultArchitectSettings extends PluginSettingTab {
 
         if (this.plugin.settings.useCustomPrompts) {
             new Setting(containerEl)
-                .setName('System prompt')
-                .setDesc('Instructions for the AI assistant.')
-                .addTextArea((ta: TextAreaComponent) => {
-                    ta.setValue(this.plugin.settings.customPrompts.systemPrompt)
-                      .onChange(async (value: string) => {
-                          this.plugin.settings.customPrompts.systemPrompt = value;
-                          await this.plugin.saveSettings();
-                      });
-                    ta.inputEl.rows = 10;
-                    ta.inputEl.style.width = '100%';
+                .setName("System Prompt")
+                .setDesc("Custom system prompt for Claude API calls")
+                .addTextArea((textarea) => {
+                    textarea
+                        .setPlaceholder("Enter your custom system prompt...")
+                        .setValue(this.plugin.settings.customPrompts.systemPrompt || "")
+                        .onChange((value) => {
+                            this.plugin.settings.customPrompts.systemPrompt = value;
+
+                            // Debounce the save to avoid excessive writes
+                            if (this.saveTimeout) clearTimeout(this.saveTimeout);
+                            this.saveTimeout = setTimeout(async () => {
+                                await this.plugin.saveSettings();
+                            }, 500);
+                        });
                 });
 
             new Setting(containerEl)
-                .setName('User prompt template')
-                .setDesc('Template for user messages. Available placeholders: {{noteTitle}}, {{tags}}, {{contentPreview}}, {{vaultStructure}}, {{userContext}}')
-                .addTextArea((ta: TextAreaComponent) => {
-                    ta.setValue(this.plugin.settings.customPrompts.userPromptTemplate)
-                      .onChange(async (value: string) => {
-                          this.plugin.settings.customPrompts.userPromptTemplate = value;
-                          await this.plugin.saveSettings();
-                      });
-                    ta.inputEl.rows = 10;
-                    ta.inputEl.style.width = '100%';
+                .setName("User Prompt Template")
+                .setDesc("Template for incorporating user context into prompts")
+                .addTextArea((textarea) => {
+                    textarea
+                        .setPlaceholder("Enter your custom user template...")
+                        .setValue(this.plugin.settings.customPrompts.userPromptTemplate || "")
+                        .onChange((value) => {
+                            this.plugin.settings.customPrompts.userPromptTemplate = value;
+
+                            // Debounce the save
+                            if (this.saveTimeout) clearTimeout(this.saveTimeout);
+                            this.saveTimeout = setTimeout(async () => {
+                                await this.plugin.saveSettings();
+                            }, 500);
+                        });
                 });
 
             new Setting(containerEl)
-                .addButton((button) => button
-                    .setButtonText('Reset to defaults')
-                    .onClick(async () => {
-                        this.plugin.settings.customPrompts.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-                        this.plugin.settings.customPrompts.userPromptTemplate = DEFAULT_USER_PROMPT_TEMPLATE;
-                        await this.plugin.saveSettings();
-                        this.display();
-                    }));
+                .setName("Reset Prompts")
+                .setDesc("Restore prompts to plugin defaults")
+                .addButton((button) => {
+                    button
+                        .setButtonText("Reset to Defaults")
+                        .onClick(async () => {
+                            this.plugin.settings.customPrompts.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+                            this.plugin.settings.customPrompts.userPromptTemplate = DEFAULT_USER_PROMPT_TEMPLATE;
+                            await this.plugin.saveSettings();
+
+                            // Refresh display
+                            this.display();
+                        });
+                });
         }
     }
 }

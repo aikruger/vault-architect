@@ -95,4 +95,63 @@ export class SmartConnectionsService {
         }
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
+
+    async getConnectionStatus() {
+        try {
+            // Try to access SC plugin
+            // @ts-ignore
+            const scPlugin = this.app.plugins.getPlugin('smart-connections');
+
+            // @ts-ignore
+            if (!scPlugin) {
+                return {
+                    connected: false,
+                    features: [],
+                    message: 'Smart Connections plugin not loaded'
+                };
+            }
+
+            // Check if API available
+            // @ts-ignore
+            if (!window.SmartConnectionsApi) {
+                return {
+                    connected: false,
+                    features: [],
+                    message: 'Smart Connections API not available'
+                };
+            }
+
+            // Try a test call
+            // @ts-ignore
+            const test = await window.SmartConnectionsApi.getEmbedding("test connection");
+
+            if (!test) {
+                return {
+                    connected: false,
+                    features: [],
+                    message: 'Embedding service not responding'
+                };
+            }
+
+            return {
+                connected: true,
+                features: [
+                    'Centroid Similarity Scoring',
+                    'Coherence-Weighted Blending',
+                    'Folder Centroid Calculation',
+                    'Hybrid Recommendation Scoring'
+                ],
+                message: 'Smart Connections connected successfully'
+            };
+
+        } catch (error) {
+            console.error('SC Status check failed:', error);
+            return {
+                connected: false,
+                features: [],
+                // @ts-ignore
+                message: 'Error checking connection: ' + error.message
+            };
+        }
+    }
 }

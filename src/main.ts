@@ -14,7 +14,8 @@ import {
 import { NoteAnalyzer } from './services/NoteAnalyzer';
 import { VaultScanner } from './services/VaultScanner';
 import { LLMCoordinator } from './services/LLMCoordinator';
-import { RecommendationModal } from './ui/RecommendationModal';
+import { SmartConnectionsService } from './services/SmartConnectionsService';
+import { RecommendationModalV2 } from './ui/RecommendationModalV2';
 import { AnalysisPanel } from './ui/AnalysisPanel';
 import { BatchPreviewModal, BatchMove } from './ui/BatchPreviewModal';
 import { VaultArchitectSettings } from './ui/SettingsTab';
@@ -24,9 +25,10 @@ export default class VaultArchitectPlugin extends Plugin {
   settings: PluginSettings;
 
   // Services
-  private noteAnalyzer: NoteAnalyzer;
-  private vaultScanner: VaultScanner;
-  private llmCoordinator: LLMCoordinator;
+  public noteAnalyzer: NoteAnalyzer;
+  public vaultScanner: VaultScanner;
+  public llmCoordinator: LLMCoordinator;
+  public smartConnectionsService: SmartConnectionsService;
 
   async onload() {
     console.log('Loading Vault Architect plugin');
@@ -37,7 +39,8 @@ export default class VaultArchitectPlugin extends Plugin {
     // Initialize services
     this.noteAnalyzer = new NoteAnalyzer(this.app, this.settings);
     this.vaultScanner = new VaultScanner(this.app, this.settings);
-    this.llmCoordinator = new LLMCoordinator(this.settings);
+    this.llmCoordinator = new LLMCoordinator(this.app, this.settings);
+    this.smartConnectionsService = new SmartConnectionsService(this.app);
 
     // Register commands
     this.registerCommands();
@@ -51,6 +54,14 @@ export default class VaultArchitectPlugin extends Plugin {
         this.showFolderRecommendation();
       });
     }
+
+    // Check SC status on startup
+    this.smartConnectionsService.getConnectionStatus()
+      .then(status => {
+        if (!status.connected) {
+          console.warn('Smart Connections not available for Vault Architect');
+        }
+      });
 
     // Lifecycle hooks
     this.registerEvent(
@@ -137,37 +148,21 @@ export default class VaultArchitectPlugin extends Plugin {
       return;
     }
 
-    try {
-      this.showMessage('Analyzing note...');
+    const modal = new RecommendationModalV2(this.app, this);
+    modal.currentFile = activeFile;
 
-      // Step 1: Analyze current note
-      const noteData = await this.noteAnalyzer.analyzeNote(activeFile);
-
-      // Step 2: Scan vault structure
-      this.showMessage('Scanning vault structure...');
-      const vaultStructure = await this.vaultScanner.scanVault();
-
-      // Step 3: Show modal with input phase
-      new RecommendationModal(
-        this.app,
-        noteData,
-        vaultStructure,
-        this.llmCoordinator,
-        this.vaultScanner,
-        this.settings,
-        activeFile,
-        async (action: 'move' | 'preview' | 'cancel', targetPath?: string) => {
-          if (action === 'move' && targetPath) {
-            await this.moveNote(activeFile, targetPath);
-          }
-        }
-      ).open();
-
-    } catch (error) {
-       // @ts-ignore
-      this.showError(`Error: ${error.message}`);
-      console.error(error);
+    // Get current file embedding if available
+    if (this.settings.useSmartConnectionsIfAvailable &&
+        this.smartConnectionsService.isAvailable()) {
+      try {
+        // @ts-ignore
+        modal.currentFileEmbedding = await this.smartConnectionsService.getNoteEmbedding(activeFile);
+      } catch (e) {
+        console.warn('Could not get file embedding:', e);
+      }
     }
+
+    modal.open();
   }
 
   async classifyFolder(folderPath: string) {
@@ -345,8 +340,44 @@ export default class VaultArchitectPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     // Reload services if needed
-    this.llmCoordinator = new LLMCoordinator(this.settings);
+    this.llmCoordinator = new LLMCoordinator(this.app, this.settings);
     this.vaultScanner = new VaultScanner(this.app, this.settings);
     this.noteAnalyzer = new NoteAnalyzer(this.app, this.settings);
+    this.smartConnectionsService = new SmartConnectionsService(this.app);
+  }
+
+  async createFolderAndMove(folderName: string, file: TFile): Promise<boolean> {
+    try {
+      // Sanitize folder name
+      const sanitized = folderName
+        .replace(/[<>:"|?*]/g, '')  // Remove invalid chars
+        .trim();
+
+      if (!sanitized) {
+        throw new Error('Invalid folder name');
+      }
+
+      // Check if folder already exists
+      const existingFolder = this.app.vault.getAbstractFileByPath(sanitized);
+      if (existingFolder && existingFolder instanceof TFolder) {
+        // Use existing folder
+        const newPath = `${sanitized}/${file.name}`;
+        await this.app.fileManager.renameFile(file, newPath);
+        return true;
+      }
+
+      // Create new folder
+      await this.app.vault.createFolder(sanitized);
+
+      // Move file to new folder
+      const newPath = `${sanitized}/${file.name}`;
+      await this.app.fileManager.renameFile(file, newPath);
+
+      return true;
+
+    } catch (error) {
+      console.error('Error creating folder and moving file:', error);
+      throw error;
+    }
   }
 }
