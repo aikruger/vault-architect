@@ -1,5 +1,6 @@
-import { App, PluginSettingTab, Setting, ToggleComponent, SliderComponent, TextComponent, DropdownComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, ToggleComponent, SliderComponent, TextComponent, DropdownComponent, TextAreaComponent } from 'obsidian';
 import VaultArchitectPlugin from '../main';
+import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../constants';
 
 export class VaultArchitectSettings extends PluginSettingTab {
     plugin: VaultArchitectPlugin;
@@ -86,5 +87,80 @@ export class VaultArchitectSettings extends PluginSettingTab {
                     this.plugin.settings.includeFullContent = value;
                     await this.plugin.saveSettings();
                 }));
+
+        new Setting(containerEl).setName('Folder Recommendation Settings').setHeading();
+
+        new Setting(containerEl)
+            .setName('Number of recommendations')
+            .setDesc('How many folder recommendations to show.')
+            .addSlider((slider: SliderComponent) => slider
+                .setLimits(1, 5, 1)
+                .setValue(this.plugin.settings.numberOfRecommendations)
+                .setDynamicTooltip()
+                .onChange(async (value: number) => {
+                    this.plugin.settings.numberOfRecommendations = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Show folder search')
+            .setDesc('Allow users to manually search and select folders.')
+            .addToggle((toggle: ToggleComponent) => toggle
+                .setValue(this.plugin.settings.showManualFolderSearch)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.showManualFolderSearch = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl).setName('Custom Prompts').setHeading();
+
+        new Setting(containerEl)
+            .setName('Use custom prompts')
+            .setDesc('Enable to customize AI system and user prompts.')
+            .addToggle((toggle: ToggleComponent) => toggle
+                .setValue(this.plugin.settings.useCustomPrompts)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.useCustomPrompts = value;
+                    await this.plugin.saveSettings();
+                    this.display(); // Refresh to show/hide prompts
+                }));
+
+        if (this.plugin.settings.useCustomPrompts) {
+            new Setting(containerEl)
+                .setName('System prompt')
+                .setDesc('Instructions for the AI assistant.')
+                .addTextArea((ta: TextAreaComponent) => {
+                    ta.setValue(this.plugin.settings.customPrompts.systemPrompt)
+                      .onChange(async (value: string) => {
+                          this.plugin.settings.customPrompts.systemPrompt = value;
+                          await this.plugin.saveSettings();
+                      });
+                    ta.inputEl.rows = 10;
+                    ta.inputEl.style.width = '100%';
+                });
+
+            new Setting(containerEl)
+                .setName('User prompt template')
+                .setDesc('Template for user messages. Available placeholders: {{noteTitle}}, {{tags}}, {{contentPreview}}, {{vaultStructure}}, {{userContext}}')
+                .addTextArea((ta: TextAreaComponent) => {
+                    ta.setValue(this.plugin.settings.customPrompts.userPromptTemplate)
+                      .onChange(async (value: string) => {
+                          this.plugin.settings.customPrompts.userPromptTemplate = value;
+                          await this.plugin.saveSettings();
+                      });
+                    ta.inputEl.rows = 10;
+                    ta.inputEl.style.width = '100%';
+                });
+
+            new Setting(containerEl)
+                .addButton((button) => button
+                    .setButtonText('Reset to defaults')
+                    .onClick(async () => {
+                        this.plugin.settings.customPrompts.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+                        this.plugin.settings.customPrompts.userPromptTemplate = DEFAULT_USER_PROMPT_TEMPLATE;
+                        await this.plugin.saveSettings();
+                        this.display();
+                    }));
+        }
     }
 }

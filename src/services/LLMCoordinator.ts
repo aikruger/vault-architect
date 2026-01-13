@@ -10,6 +10,7 @@ import {
   OpenAIRequest
 } from '../models/types';
 import { OpenAIAdapter } from '../adapters/OpenAIAdapter';
+import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../constants';
 
 export class LLMCoordinator {
   private openaiAdapter: OpenAIAdapter;
@@ -20,18 +21,16 @@ export class LLMCoordinator {
 
   async recommendFolder(
     noteData: CurrentNote,
-    folderProfiles: FolderProfile[]
+    folderProfiles: FolderProfile[],
+    userContext: string = ""
   ): Promise<RecommendationResult> {
     const startTime = Date.now();
 
-    // Build context about vault structure
-    const vaultContext = this.buildVaultContext(folderProfiles);
-
     // Create system prompt
-    const systemPrompt = this.createRecommendationSystemPrompt();
+    const systemPrompt = this.getSystemPrompt();
 
     // Create user prompt
-    const userPrompt = this.createRecommendationUserPrompt(noteData, folderProfiles);
+    const userPrompt = this.buildUserPrompt(noteData, folderProfiles, userContext);
 
     // Call LLM
     const messages: ChatMessage[] = [
@@ -101,35 +100,24 @@ Generate a comprehensive Folder Note content (Markdown) including:
   // PROMPT ENGINEERING
   // ============================================
 
-  private createRecommendationSystemPrompt(): string {
-    return `You are a knowledge architect and organizational specialist. Your expertise includes:
-- Personal Knowledge Management (PKM) systems
-- Information architecture and taxonomy design
-- Actor-Network Theory applied to knowledge organization
-- Semantic classification and categorization
-- Understanding how individuals organize information
-
-Your task is to recommend the most appropriate folder for a note based on:
-1. The note's semantic content (heading, tags, key topics)
-2. The existing vault structure and folder purposes
-3. Thematic alignment and coherence
-4. Best practices in knowledge organization
-
-When making recommendations:
-- Consider semantic similarity to existing folder content
-- Look for thematic alignment with folder notes/descriptions
-- Suggest creating new folders only when truly necessary
-- Provide clear reasoning for your recommendations
-- Be specific about which aspects of the note drive the recommendation
-
-Format your response as valid JSON (see example below).`;
+  private getSystemPrompt(): string {
+    if (this.settings.useCustomPrompts && this.settings.customPrompts?.systemPrompt) {
+      return this.settings.customPrompts.systemPrompt;
+    }
+    return DEFAULT_SYSTEM_PROMPT;
   }
 
-  private createRecommendationUserPrompt(
-    noteData: CurrentNote,
-    folderProfiles: FolderProfile[]
-  ): string {
-    const foldersList = folderProfiles.map(fp =>
+  private getUserPromptTemplate(): string {
+    if (this.settings.useCustomPrompts && this.settings.customPrompts?.userPromptTemplate) {
+      return this.settings.customPrompts.userPromptTemplate;
+    }
+    return DEFAULT_USER_PROMPT_TEMPLATE;
+  }
+
+  private buildUserPrompt(noteData: CurrentNote, folderProfiles: FolderProfile[], userContext: string = ""): string {
+    let template = this.getUserPromptTemplate();
+
+    const vaultStructure = folderProfiles.map(fp =>
       `Folder: "${fp.folderPath}"
   Description: ${fp.description}
   Files: ${fp.fileCount}
@@ -137,40 +125,12 @@ Format your response as valid JSON (see example below).`;
   Folder Note: ${fp.folderNote?.description || 'None'}`
     ).join('\n\n');
 
-    return `Analyze this note and recommend the best folder:
-
-NOTE DETAILS:
-Title: "${noteData.title}"
-Tags: ${noteData.tags.length > 0 ? noteData.tags.join(', ') : 'None'}
-Content Preview: ${noteData.contentPreview}
-Headings: ${noteData.headings.join(' > ') || 'None'}
-
-EXISTING FOLDERS:
-${foldersList}
-
-RECOMMENDATION REQUEST:
-1. What is the primary folder recommendation? (with confidence 0-100%)
-2. Why is this folder appropriate?
-3. What are 2 alternative folders?
-4. Should a new folder be created instead? If yes, what should it be named?
-
-Respond with valid JSON following this structure:
-{
-  "primaryRecommendation": {
-    "folderPath": "path/to/folder",
-    "confidence": 85,
-    "reasoning": "This folder contains similar notes about...",
-    "matchedTopics": ["topic1", "topic2"]
-  },
-  "alternatives": [
-    {"folderPath": "...", "confidence": 70, "reasoning": "..."}
-  ],
-  "suggestedNewFolder": {
-    "name": "New Folder Name",
-    "reasoning": "No existing folder adequately covers...",
-    "suggestedParent": "parent/folder/path"
-  }
-}`;
+    return template
+      .replace("{{noteTitle}}", noteData.title || "Untitled")
+      .replace("{{tags}}", (noteData.tags || []).join(", "))
+      .replace("{{contentPreview}}", noteData.contentPreview || "")
+      .replace("{{vaultStructure}}", vaultStructure)
+      .replace("{{userContext}}", userContext);
   }
 
   private createAnalysisSystemPrompt(): string {

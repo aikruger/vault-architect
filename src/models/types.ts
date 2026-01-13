@@ -1,3 +1,5 @@
+import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../constants';
+
 // ============================================
 // NOTE ANALYSIS TYPES
 // ============================================
@@ -210,6 +212,11 @@ export interface EmbeddingCache {
 // SETTINGS TYPES
 // ============================================
 
+export interface CustomPrompts {
+  systemPrompt: string;
+  userPromptTemplate: string;
+}
+
 export interface PluginSettings {
   // General
   enableOnNoteCreation: boolean;
@@ -250,6 +257,14 @@ export interface PluginSettings {
   theme: 'auto' | 'light' | 'dark';
   showToolbarButton: boolean;
   defaultAction: 'preview' | 'move' | 'ask';
+
+  // Custom Prompts
+  useCustomPrompts: boolean;
+  customPrompts: CustomPrompts;
+
+  // Folder Recommendations
+  numberOfRecommendations: number;
+  showManualFolderSearch: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -284,4 +299,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   theme: 'auto',
   showToolbarButton: true,
   defaultAction: 'preview',
+
+  useCustomPrompts: false,
+  customPrompts: {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    userPromptTemplate: DEFAULT_USER_PROMPT_TEMPLATE
+  },
+  numberOfRecommendations: 3,
+  showManualFolderSearch: true
 };

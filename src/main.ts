@@ -147,17 +147,14 @@ export default class VaultArchitectPlugin extends Plugin {
       this.showMessage('Scanning vault structure...');
       const vaultStructure = await this.vaultScanner.scanVault();
 
-      // Step 3: Get recommendations from LLM
-      this.showMessage('Getting recommendations from AI...');
-      const recommendations = await this.llmCoordinator.recommendFolder(
-        noteData,
-        vaultStructure
-      );
-
-      // Step 4: Show modal with recommendations
+      // Step 3: Show modal with input phase
       new RecommendationModal(
         this.app,
-        recommendations,
+        noteData,
+        vaultStructure,
+        this.llmCoordinator,
+        this.vaultScanner,
+        this.settings,
         activeFile,
         async (action: 'move' | 'preview' | 'cancel', targetPath?: string) => {
           if (action === 'move' && targetPath) {
