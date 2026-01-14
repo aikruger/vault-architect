@@ -136,7 +136,7 @@ export class SmartConnectionsService {
         }
 
         // Calculate centroid (average)
-        const dimension = embeddings[0].length;
+        const dimension = embeddings[0]!.length;
         const centroid = new Array(dimension).fill(0);
 
         for (const embedding of embeddings) {
