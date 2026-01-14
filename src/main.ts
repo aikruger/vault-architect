@@ -37,10 +37,17 @@ export default class VaultArchitectPlugin extends Plugin {
     await this.loadSettings();
 
     // Initialize services
+    this.smartConnectionsService = new SmartConnectionsService(this.app);
     this.noteAnalyzer = new NoteAnalyzer(this.app, this.settings);
     this.vaultScanner = new VaultScanner(this.app, this.settings);
-    this.llmCoordinator = new LLMCoordinator(this.app, this.settings);
-    this.smartConnectionsService = new SmartConnectionsService(this.app);
+    this.llmCoordinator = new LLMCoordinator(this.app, this.settings, this.smartConnectionsService);
+
+    // Initial check
+    this.smartConnectionsService.initialize().then(() => {
+        this.smartConnectionsService.getConnectionStatus().then(status => {
+             console.log('[VAULT ARCHITECT] Smart Connections Status:', status);
+        });
+    });
 
     // Register commands
     this.registerCommands();
@@ -54,14 +61,6 @@ export default class VaultArchitectPlugin extends Plugin {
         this.showFolderRecommendation();
       });
     }
-
-    // Check SC status on startup
-    this.smartConnectionsService.getConnectionStatus()
-      .then(status => {
-        if (!status.connected) {
-          console.warn('Smart Connections not available for Vault Architect');
-        }
-      });
 
     // Lifecycle hooks
     this.registerEvent(
@@ -153,10 +152,10 @@ export default class VaultArchitectPlugin extends Plugin {
 
     // Get current file embedding if available
     if (this.settings.useSmartConnectionsIfAvailable &&
-        this.smartConnectionsService.isAvailable()) {
+        this.smartConnectionsService.isSmartConnectionsAvailable()) {
       try {
         // @ts-ignore
-        modal.currentFileEmbedding = await this.smartConnectionsService.getNoteEmbedding(activeFile);
+        modal.currentFileEmbedding = await this.smartConnectionsService.getFileEmbedding(activeFile);
         console.log('[RECOMMEND] Got current file embedding');
       } catch (e) {
         console.warn('Could not get file embedding:', e);

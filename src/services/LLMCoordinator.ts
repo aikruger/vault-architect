@@ -12,11 +12,12 @@ import {
 } from '../models/types';
 import { OpenAIAdapter } from '../adapters/OpenAIAdapter';
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../constants';
+import { SmartConnectionsService } from './SmartConnectionsService';
 
 export class LLMCoordinator {
   private openaiAdapter: OpenAIAdapter;
 
-  constructor(private app: App, private settings: PluginSettings) {
+  constructor(private app: App, private settings: PluginSettings, private smartConnectionsService?: SmartConnectionsService) {
     this.openaiAdapter = new OpenAIAdapter(settings);
   }
 
@@ -82,7 +83,7 @@ export class LLMCoordinator {
   async scoreRecommendationsWithEmbeddings(recommendations: RecommendationResult, currentFileEmbedding: number[], folderProfiles: FolderProfile[]) {
     console.log(`[SIMILARITY] Starting similarity scoring...`);
     console.log(`[SIMILARITY] File embedding dimensions: ${currentFileEmbedding?.length || 'null'}`);
-    if (!currentFileEmbedding || !folderProfiles) {
+    if (!currentFileEmbedding || !folderProfiles || !this.smartConnectionsService) {
       return recommendations;
     }
 
@@ -93,47 +94,30 @@ export class LLMCoordinator {
 
             if (!folderData) {
                 console.log(`[SIMILARITY] No folder data for ${rec.folderPath}`);
-                rec.similarity = 0.5; // Default if no centroid
-                rec.enhancedConfidence = rec.confidence;
                 return;
             }
 
             if (!folderData.hasValidCentroid || !folderData.folderCentroid) {
                 console.log(`[SIMILARITY] No valid centroid for ${rec.folderPath}`);
-                rec.similarity = 0.5; // Default if no centroid
-                rec.enhancedConfidence = rec.confidence;
                 return;
             }
 
-            // Calculate cosine similarity to folder centroid
-            const similarity = this.cosineSimilarity(
+            // Use service for scoring logic
+            const scoreResult = this.smartConnectionsService!.scoreRecommendationWithEmbedding(
                 currentFileEmbedding,
-                folderData.folderCentroid
+                folderData.folderCentroid,
+                folderData.coherenceScore,
+                rec.confidence / 100 // LLM score 0-1
             );
 
-            console.log(`[SIMILARITY] ${rec.folderPath}: similarity=${(similarity * 100).toFixed(1)}%, coherence=${(folderData.coherenceScore * 100).toFixed(1)}%`);
+            rec.similarity = scoreResult.similarity;
+            rec.enhancedConfidence = Math.round(scoreResult.enhanced * 100);
 
-            rec.similarity = similarity;
-
-            // Blend confidence with similarity using coherence as weight
-            const coherence = folderData.coherenceScore || 0.5;
-            // Convert confidence to 0-1 for blending
-            const llmConf = rec.confidence / 100;
-
-            const blended = this.blendConfidenceScores(
-                llmConf,
-                similarity,
-                coherence
-            );
-
-            rec.enhancedConfidence = Math.round(blended * 100);
             console.log(`[SIMILARITY] ${rec.folderPath}: LLM=${(rec.confidence).toFixed(1)}% → Enhanced=${(rec.enhancedConfidence).toFixed(1)}%`);
 
         } catch (error) {
             // @ts-ignore
             console.error(`[SIMILARITY] Error scoring ${rec.folderPath}:`, error.message);
-            rec.similarity = 0.5;
-            rec.enhancedConfidence = rec.confidence;
         }
     }
 
@@ -146,34 +130,6 @@ export class LLMCoordinator {
     }
 
     return recommendations;
-  }
-
-  // Cosine similarity between two vectors
-  cosineSimilarity(vec1: number[], vec2: number[]): number {
-    if (!vec1 || !vec2 || vec1.length !== vec2.length) {
-      return 0;
-    }
-
-    let dotProduct = 0;
-    let mag1 = 0;
-    let mag2 = 0;
-
-    for (let i = 0; i < vec1.length; i++) {
-      const v1 = vec1[i] || 0;
-      const v2 = vec2[i] || 0;
-      dotProduct += v1 * v2;
-      mag1 += v1 * v1;
-      mag2 += v2 * v2;
-    }
-
-    mag1 = Math.sqrt(mag1);
-    mag2 = Math.sqrt(mag2);
-
-    if (mag1 === 0 || mag2 === 0) {
-      return 0;
-    }
-
-    return dotProduct / (mag1 * mag2);
   }
 
   async analyzeVault(folderProfiles: FolderProfile[]): Promise<VaultAnalysisReport> {

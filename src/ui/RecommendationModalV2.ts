@@ -419,7 +419,7 @@ export class RecommendationModalV2 extends Modal {
                   const folderData = this.vaultProfiles.find(p => p.folderPath === folder.path);
                    if (folderData && folderData.hasValidCentroid && this.currentFileEmbedding) {
                        try {
-                           const similarity = this.plugin.llmCoordinator.cosineSimilarity(
+                           const similarity = this.plugin.smartConnectionsService.cosineSimilarity(
                                this.currentFileEmbedding,
                                folderData.folderCentroid!
                            );

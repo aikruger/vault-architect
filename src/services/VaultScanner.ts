@@ -51,7 +51,7 @@ export class VaultScanner {
     console.log(`[CENTROID] Calculating centroid for folder: ${folder.path}`);
     console.log(`[CENTROID] Folder has ${files.length} notes`);
 
-    if (this.settings.useSmartConnectionsIfAvailable && this.smartConnectionsService.isAvailable()) {
+    if (this.settings.useSmartConnectionsIfAvailable && this.smartConnectionsService.isSmartConnectionsAvailable()) {
          coherenceScore = await this.smartConnectionsService.calculateCoherence(files);
 
          // Calculate folder centroid (average embedding)
