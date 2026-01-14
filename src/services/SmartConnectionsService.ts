@@ -1,17 +1,78 @@
-import { App, TFile } from 'obsidian';
+import { App, TFile, TFolder } from 'obsidian';
 import { Vector } from '../models/types';
+
+class EmbeddingsCache {
+    private vectors: Record<string, number[]> | null = null;
+    private lastLoadTime: number | null = null;
+    public cacheValid = false;
+
+    constructor(private app: App) {}
+
+    async loadVectors(): Promise<boolean> {
+        try {
+            const vectorsFile = this.app.vault.getAbstractFileByPath('.smart-env/vectors.json');
+
+            if (!vectorsFile) {
+                console.warn('vectors.json not found');
+                return false;
+            }
+
+            // @ts-ignore
+            const content = await this.app.vault.read(vectorsFile);
+            this.vectors = JSON.parse(content);
+            this.lastLoadTime = Date.now();
+            this.cacheValid = true;
+
+            const count = Object.keys(this.vectors || {}).length;
+            console.log(`[SC DEBUG] ✅ Loaded ${count} embeddings from vectors.json`);
+
+            return true;
+        } catch (error) {
+            console.error('[SC DEBUG] Failed to load vectors.json:', error);
+            this.cacheValid = false;
+            return false;
+        }
+    }
+
+    getEmbedding(filePath: string): number[] | null {
+        if (!this.cacheValid || !this.vectors) {
+            // Try explicit load if invalid
+            return null;
+        }
+
+        const embedding = this.vectors![filePath];
+
+        if (!embedding) {
+            // console.warn(`No embedding found for: ${filePath}`);
+            return null;
+        }
+
+        return Array.isArray(embedding) ? embedding : null;
+    }
+
+    isCacheValid(): boolean {
+        // Invalidate cache after 5 minutes
+        if (!this.lastLoadTime) return false;
+        return this.cacheValid && (Date.now() - this.lastLoadTime) < (5 * 60 * 1000);
+    }
+}
 
 export class SmartConnectionsService {
     app: App;
     private pluginId = 'smart-connections';
+    private embeddingsCache: EmbeddingsCache;
+    private folderCentroids: Map<string, number[]> = new Map();
 
     constructor(app: App) {
         this.app = app;
+        this.embeddingsCache = new EmbeddingsCache(app);
     }
 
     isAvailable(): boolean {
         // @ts-ignore
-        return !!this.app.plugins.getPlugin(this.pluginId);
+        const plugin = this.app.plugins.getPlugin(this.pluginId);
+        // Also consider available if we have cached vectors
+        return !!plugin || this.embeddingsCache.cacheValid;
     }
 
     private getPlugin(): any {
@@ -20,8 +81,7 @@ export class SmartConnectionsService {
     }
 
     async getEmbedding(text: string): Promise<Vector | null> {
-        if (!this.isAvailable()) return null;
-
+        // Text embedding still needs the API if possible
         const plugin = this.getPlugin();
         try {
              if (plugin && plugin.api && typeof plugin.api.getEmbedding === 'function') {
@@ -34,18 +94,64 @@ export class SmartConnectionsService {
     }
 
     async getNoteEmbedding(file: TFile): Promise<Vector | null> {
-         if (!this.isAvailable()) return null;
-
+         // 1. Try API first
          const plugin = this.getPlugin();
-
          try {
              if (plugin && plugin.api && typeof plugin.api.getNoteEmbedding === 'function') {
-                 return await plugin.api.getNoteEmbedding(file);
+                 const emb = await plugin.api.getNoteEmbedding(file);
+                 if (emb) return emb;
              }
          } catch(e) {
-             console.error("Error fetching note embedding from Smart Connections:", e as Error);
+             // Continue to fallback
          }
-         return null;
+
+         // 2. Fallback to cache
+         if (!this.embeddingsCache.isCacheValid()) {
+             await this.embeddingsCache.loadVectors();
+         }
+         return this.embeddingsCache.getEmbedding(file.path);
+    }
+
+    async calculateFolderCentroid(folder: TFolder, files: TFile[]): Promise<number[] | null> {
+        if (!this.isAvailable()) return null;
+
+        // Check cache first
+        if (this.folderCentroids.has(folder.path)) {
+            return this.folderCentroids.get(folder.path)!;
+        }
+
+        const embeddings: number[][] = [];
+
+        // Get embeddings for all files in folder
+        for (const file of files) {
+            const embedding = await this.getNoteEmbedding(file);
+            if (embedding && Array.isArray(embedding)) {
+                embeddings.push(embedding);
+            }
+        }
+
+        if (embeddings.length === 0) {
+            // console.warn(`No embeddings found for folder: ${folder.path}`);
+            return null;
+        }
+
+        // Calculate centroid (average)
+        const dimension = embeddings[0].length;
+        const centroid = new Array(dimension).fill(0);
+
+        for (const embedding of embeddings) {
+            for (let i = 0; i < dimension; i++) {
+                centroid[i] += (embedding[i] || 0);
+            }
+        }
+
+        for (let i = 0; i < dimension; i++) {
+            centroid[i] /= embeddings.length;
+        }
+
+        console.log(`[SC DEBUG] ✅ Calculated centroid for ${folder.path} (${embeddings.length} notes)`);
+        this.folderCentroids.set(folder.path, centroid);
+        return centroid;
     }
 
     async calculateCoherence(files: TFile[]): Promise<number> {
@@ -136,12 +242,12 @@ export class SmartConnectionsService {
             let api = scPlugin.api || scPlugin.smartConnectionsApi || window.SmartConnectionsApi;
             console.log('[SC DEBUG] API found via direct access:', !!api);
 
-            // Step 4: If API not found, try to get embeddings directly
-            if (!api && scPlugin.settings) {
-                console.log('[SC DEBUG] API not available, checking embeddings database...');
-                const hasEmbeddings = scPlugin.settings.embeddings_folder &&
-                    this.app.vault.getAbstractFileByPath(scPlugin.settings.embeddings_folder);
-                console.log('[SC DEBUG] Has embeddings folder:', !!hasEmbeddings);
+            // Step 4: If API not found, try to get embeddings directly via cache
+            let directAccess = false;
+            if (!api) {
+                console.log('[SC DEBUG] API not available, checking vectors.json...');
+                directAccess = await this.embeddingsCache.loadVectors();
+                console.log('[SC DEBUG] Direct vectors.json access:', directAccess);
             }
 
             // Step 5: Test with vault root
@@ -166,14 +272,18 @@ export class SmartConnectionsService {
                 }
             }
 
+            const isConnected = !!api || directAccess;
+            const message = !!api ? 'Smart Connections connected (API)' :
+                           directAccess ? 'Smart Connections connected (Direct Read)' : 'API/DB not accessible';
+
             return {
-                connected: !!api,
-                features: api ? [
+                connected: isConnected,
+                features: isConnected ? [
                     'Centroid Similarity Scoring',
                     'Coherence-Weighted Blending',
                     'Folder Centroid Calculation'
                 ] : [],
-                message: api ? 'Smart Connections connected' : 'API not accessible'
+                message: message
             };
 
         } catch (error) {
