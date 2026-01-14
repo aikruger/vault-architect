@@ -97,60 +97,95 @@ export class SmartConnectionsService {
     }
 
     async getConnectionStatus() {
+        console.log('[SC DEBUG] Starting connection status check...');
+
         try {
-            // Try to access SC plugin
+            // Step 1: Check if plugin exists
+            console.log('[SC DEBUG] Looking for smart-connections plugin...');
             // @ts-ignore
             const scPlugin = this.app.plugins.getPlugin('smart-connections');
+            console.log('[SC DEBUG] Smart Connections plugin found:', !!scPlugin);
 
-            // @ts-ignore
             if (!scPlugin) {
+                // @ts-ignore
+                console.log('[SC DEBUG] Plugin not found. Installed plugins:', Array.from(this.app.plugins.plugins.keys()));
                 return {
                     connected: false,
                     features: [],
-                    message: 'Smart Connections plugin not loaded'
+                    message: 'Smart Connections plugin not installed'
                 };
             }
 
-            // Check if API available
-            // @ts-ignore
-            if (!window.SmartConnectionsApi) {
+            // Step 2: Check if plugin is enabled
+            console.log('[SC DEBUG] Plugin loaded:', scPlugin.loaded);
+            if (!scPlugin.loaded) {
+                console.log('[SC DEBUG] Plugin exists but not loaded');
                 return {
                     connected: false,
                     features: [],
-                    message: 'Smart Connections API not available'
+                    message: 'Smart Connections plugin not enabled'
                 };
             }
 
-            // Try a test call
-            // @ts-ignore
-            const test = await window.SmartConnectionsApi.getEmbedding("test connection");
+            // Step 3: Check if API exists
+            console.log('[SC DEBUG] Checking for API...');
+            console.log('[SC DEBUG] Plugin object keys:', Object.keys(scPlugin).slice(0, 20));
 
-            if (!test) {
-                return {
-                    connected: false,
-                    features: [],
-                    message: 'Embedding service not responding'
-                };
+            // Try multiple API access patterns
+            // @ts-ignore
+            let api = scPlugin.api || scPlugin.smartConnectionsApi || window.SmartConnectionsApi;
+            console.log('[SC DEBUG] API found via direct access:', !!api);
+
+            // Step 4: If API not found, try to get embeddings directly
+            if (!api && scPlugin.settings) {
+                console.log('[SC DEBUG] API not available, checking embeddings database...');
+                const hasEmbeddings = scPlugin.settings.embeddings_folder &&
+                    this.app.vault.getAbstractFileByPath(scPlugin.settings.embeddings_folder);
+                console.log('[SC DEBUG] Has embeddings folder:', !!hasEmbeddings);
+            }
+
+            // Step 5: Test with vault root
+            if (api) {
+                console.log('[SC DEBUG] Testing API with vault root...');
+                const rootFile = this.app.vault.getRoot();
+
+                // Test getNoteEmbedding
+                if (typeof api.getNoteEmbedding === 'function') {
+                    console.log('[SC DEBUG] getNoteEmbedding function available');
+                    const testEmb = await Promise.race([
+                        api.getNoteEmbedding(rootFile),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('API timeout')), 5000)
+                        )
+                    ]);
+                    // @ts-ignore
+                    console.log('[SC DEBUG] Test embedding received:', !!testEmb, 'dimensions:', testEmb?.length);
+                } else {
+                    console.log('[SC DEBUG] getNoteEmbedding not a function');
+                    console.log('[SC DEBUG] API methods available:', Object.keys(api).slice(0, 10));
+                }
             }
 
             return {
-                connected: true,
-                features: [
+                connected: !!api,
+                features: api ? [
                     'Centroid Similarity Scoring',
                     'Coherence-Weighted Blending',
-                    'Folder Centroid Calculation',
-                    'Hybrid Recommendation Scoring'
-                ],
-                message: 'Smart Connections connected successfully'
+                    'Folder Centroid Calculation'
+                ] : [],
+                message: api ? 'Smart Connections connected' : 'API not accessible'
             };
 
         } catch (error) {
-            console.error('SC Status check failed:', error);
+            // @ts-ignore
+            console.error('[SC DEBUG] Connection check error:', error.message);
+            // @ts-ignore
+            console.error('[SC DEBUG] Error stack:', error.stack);
             return {
                 connected: false,
                 features: [],
                 // @ts-ignore
-                message: 'Error checking connection: ' + error.message
+                message: 'Error: ' + error.message
             };
         }
     }

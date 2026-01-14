@@ -26,6 +26,7 @@ export class LLMCoordinator {
     userContext: string = "",
     currentFileEmbedding?: number[]
   ): Promise<RecommendationResult> {
+    console.log('[LLM] Getting recommendation with context:', userContext.substring(0, 50) + '...');
     const startTime = Date.now();
 
     // Create system prompt
@@ -33,6 +34,9 @@ export class LLMCoordinator {
 
     // Create user prompt
     const userPrompt = this.buildUserPrompt(noteData, folderProfiles, userContext);
+
+    console.log('[LLM] User prompt with context:');
+    console.log(userPrompt.substring(0, 200));
 
     // Call LLM
     const messages: ChatMessage[] = [
@@ -48,9 +52,11 @@ export class LLMCoordinator {
 
     // Parse response
     const result = this.parseRecommendationResponse(response.content, folderProfiles);
+    console.log('[LLM] Got ' + (result.primaryRecommendation ? '1' : '0') + ' primary recommendation from LLM');
 
     // Enhance with embedding scores if available
     if (currentFileEmbedding && currentFileEmbedding.length > 0) {
+        console.log('[LLM] Enhancing recommendations with embeddings...');
         await this.scoreRecommendationsWithEmbeddings(result, currentFileEmbedding, folderProfiles);
     }
 
@@ -74,6 +80,8 @@ export class LLMCoordinator {
 
   // Score recommendations using embeddings
   async scoreRecommendationsWithEmbeddings(recommendations: RecommendationResult, currentFileEmbedding: number[], folderProfiles: FolderProfile[]) {
+    console.log(`[SIMILARITY] Starting similarity scoring...`);
+    console.log(`[SIMILARITY] File embedding dimensions: ${currentFileEmbedding?.length || 'null'}`);
     if (!currentFileEmbedding || !folderProfiles) {
       return recommendations;
     }
@@ -81,8 +89,17 @@ export class LLMCoordinator {
     const processRec = (rec: FolderRecommendation) => {
         try {
             const folderData = folderProfiles.find(f => f.folderPath === rec.folderPath);
+            console.log(`[SIMILARITY] Scoring folder: ${rec.folderPath}`);
 
-            if (!folderData || !folderData.hasValidCentroid || !folderData.folderCentroid) {
+            if (!folderData) {
+                console.log(`[SIMILARITY] No folder data for ${rec.folderPath}`);
+                rec.similarity = 0.5; // Default if no centroid
+                rec.enhancedConfidence = rec.confidence;
+                return;
+            }
+
+            if (!folderData.hasValidCentroid || !folderData.folderCentroid) {
+                console.log(`[SIMILARITY] No valid centroid for ${rec.folderPath}`);
                 rec.similarity = 0.5; // Default if no centroid
                 rec.enhancedConfidence = rec.confidence;
                 return;
@@ -93,6 +110,8 @@ export class LLMCoordinator {
                 currentFileEmbedding,
                 folderData.folderCentroid
             );
+
+            console.log(`[SIMILARITY] ${rec.folderPath}: similarity=${(similarity * 100).toFixed(1)}%, coherence=${(folderData.coherenceScore * 100).toFixed(1)}%`);
 
             rec.similarity = similarity;
 
@@ -108,9 +127,11 @@ export class LLMCoordinator {
             );
 
             rec.enhancedConfidence = Math.round(blended * 100);
+            console.log(`[SIMILARITY] ${rec.folderPath}: LLM=${(rec.confidence).toFixed(1)}% → Enhanced=${(rec.enhancedConfidence).toFixed(1)}%`);
 
         } catch (error) {
-            console.error('Error scoring recommendation for ' + rec.folderName + ':', error);
+            // @ts-ignore
+            console.error(`[SIMILARITY] Error scoring ${rec.folderPath}:`, error.message);
             rec.similarity = 0.5;
             rec.enhancedConfidence = rec.confidence;
         }
@@ -198,32 +219,41 @@ Generate a comprehensive Folder Note content (Markdown) including:
     return response.content;
   }
 
-  async generateFolderNames(file: TFile, userContext: string, topFolders: FolderRecommendation[] = []): Promise<string[]> {
+  async generateFolderNames(file: TFile, userContext: string, topFolders: FolderRecommendation[] = []): Promise<any> {
+    console.log('[FOLDERGEN] Generating folder names...');
     try {
       const fileContent = await this.app.vault.read(file);
       const topFoldersList = topFolders
-        .slice(0, 5)
-        .map(f => f.folderName)
+        .slice(0, 3)
+        .map(f => f.folderPath || f.folderName)
         .join(', ');
 
-      const prompt = `Based on this file content and the user context, suggest 3 new folder names where this file could be organized.
+      // Find potential parent folders based on top recommendations
+      let parentFolderSuggestions = 'None';
+      if (topFolders.length > 0) {
+        console.log('[FOLDERGEN] Top folders available as parents:', topFoldersList);
+        parentFolderSuggestions = topFoldersList;
+      }
+
+      const prompt = `Based on this file content and user context, suggest ONE primary folder name and UP TO TWO alternative parent folders where it could be organized.
 
 File: ${file.name}
 Content preview: ${fileContent.substring(0, 500)}...
 User context: ${userContext || 'None provided'}
-Most likely folders: ${topFoldersList || 'None'}
+Top recommended folders: ${parentFolderSuggestions}
 
 Requirements:
-1. Names should be concise (1-3 words)
+1. Primary name should be 1-3 words
 2. Should reflect the file content
-3. Should follow existing vault naming conventions
-4. First suggestion should be the best match
-5. Use PascalCase for consistency
+3. Should follow existing vault naming conventions (PascalCase)
+4. Consider if it should be a subfolder under one of the recommended folders
+5. Return ONLY a JSON object with this structure (no other text):
 
-Format your response as JSON array with exactly 3 suggestions:
-["Suggestion1", "Suggestion2", "Suggestion3"]
-
-Only return the JSON array, no other text.`;
+{
+  "primaryName": "SuggestedFolderName",
+  "suggestedParentFolders": ["ParentFolder1", "ParentFolder2"],
+  "reasoning": "Brief explanation of why this name and location"
+}`;
 
       const messages: ChatMessage[] = [{ role: 'user', content: prompt }];
 
@@ -232,20 +262,54 @@ Only return the JSON array, no other text.`;
           temperature: 0.7,
           maxTokens: 500
       });
+      console.log('[FOLDERGEN] Raw response:', response.content);
 
-      // Parse JSON response
-      const match = response.content.match(/\["[^"]*"(?:,\s*"[^"]*")*\]/);
-      if (!match) {
-        console.warn('Failed to parse folder suggestions:', response.content);
-        return ['NewFolder1', 'NewFolder2', 'NewFolder3'];
+      // Parse JSON response - handle both plain object and wrapped object
+      let parsed;
+      try {
+        // First try direct parse
+        parsed = JSON.parse(response.content);
+      } catch (e) {
+        // Try to extract JSON from response
+        const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('No JSON found in response');
+        }
       }
 
-      const suggestions = JSON.parse(match[0]);
-      return suggestions.slice(0, 3); // Ensure max 3
+      // Handle different response formats
+      // @ts-ignore
+      if (parsed.suggestions && Array.isArray(parsed.suggestions)) {
+        // Old format - just convert to new format
+        console.log('[FOLDERGEN] Got legacy format, converting...');
+        return {
+          // @ts-ignore
+          primaryName: parsed.suggestions[0] || 'NewFolder',
+          suggestedParentFolders: [],
+          reasoning: 'Generated from file content'
+        };
+      }
+
+      // New format
+      console.log('[FOLDERGEN] Generated suggestion:', parsed.primaryName);
+      console.log('[FOLDERGEN] Suggested parents:', parsed.suggestedParentFolders);
+
+      return {
+        primaryName: parsed.primaryName || 'NewFolder',
+        suggestedParentFolders: Array.isArray(parsed.suggestedParentFolders) ?
+          parsed.suggestedParentFolders : [],
+        reasoning: parsed.reasoning || ''
+      };
 
     } catch (error) {
       console.error('Error generating folder names:', error);
-      return ['NewFolder1', 'NewFolder2', 'NewFolder3'];
+      return {
+        primaryName: 'NewFolder',
+        suggestedParentFolders: [],
+        reasoning: 'Error generating suggestions'
+      };
     }
   }
 
@@ -328,16 +392,21 @@ Provide a JSON analysis with:
     content: string,
     folderProfiles: FolderProfile[]
   ): RecommendationResult {
+    console.log('[PARSE] Parsing recommendation response...');
     try {
       const json = JSON.parse(content) as {
           primaryRecommendation: {
               folderPath: string;
+              folderName?: string;
+              folder?: string;
               confidence: number;
               reasoning: string;
               matchedTopics?: string[];
           };
           alternatives?: Array<{
               folderPath: string;
+              folderName?: string;
+              folder?: string;
               confidence: number;
               reasoning: string;
               matchedTopics?: string[];
@@ -351,25 +420,29 @@ Provide a JSON analysis with:
 
       const primaryRec = json.primaryRecommendation;
       const primaryFolder = folderProfiles.find(f => f.folderPath === primaryRec.folderPath);
+      console.log('[PARSE] Primary recommendation folder:', primaryRec.folderPath);
 
       return {
         primaryRecommendation: {
-          folderPath: primaryRec.folderPath,
-          folderName: primaryFolder?.folderName || primaryRec.folderPath,
+          folderPath: primaryRec.folderPath || primaryRec.folder || primaryRec.folderName || '',
+          folderName: primaryFolder?.folderName || primaryRec.folderName || primaryRec.folderPath,
           confidence: primaryRec.confidence,
           reasoning: primaryRec.reasoning,
           matchedTopics: primaryRec.matchedTopics || [],
           matchStrength: primaryRec.confidence > 80 ? 'strong' :
                         primaryRec.confidence > 60 ? 'moderate' : 'weak'
         },
-        alternatives: (json.alternatives || []).map((alt) => ({
-          folderPath: alt.folderPath,
-          folderName: folderProfiles.find(f => f.folderPath === alt.folderPath)?.folderName || alt.folderPath,
-          confidence: alt.confidence,
-          reasoning: alt.reasoning,
-          matchedTopics: alt.matchedTopics || [],
-          matchStrength: 'moderate' as const
-        })),
+        alternatives: (json.alternatives || []).map((alt, index) => {
+            console.log('[PARSE] Alternative ' + (index + 1) + ' folder:', alt.folderPath);
+            return {
+              folderPath: alt.folderPath || alt.folder || alt.folderName || '',
+              folderName: folderProfiles.find(f => f.folderPath === alt.folderPath)?.folderName || alt.folderName || alt.folderPath,
+              confidence: alt.confidence,
+              reasoning: alt.reasoning,
+              matchedTopics: alt.matchedTopics || [],
+              matchStrength: 'moderate' as const
+            };
+        }),
         shouldCreateNewFolder: !!json.suggestedNewFolder && !!json.suggestedNewFolder.name,
         suggestedNewFolder: json.suggestedNewFolder,
         analysisMetadata: {

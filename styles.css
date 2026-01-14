@@ -446,3 +446,126 @@ textarea::placeholder {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.folder-path {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-primary);
+  word-break: break-all;
+}
+
+.folder-name {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.recommendation-item {
+  padding: 12px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--color-primary);
+  background-color: var(--color-secondary);
+  border-radius: 4px;
+}
+
+.folder-suggestion-reasoning {
+  padding: 12px;
+  margin-bottom: 16px;
+  background-color: rgba(16, 185, 129, 0.1);
+  border-left: 3px solid #10b981;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.parent-folders-section {
+  margin-bottom: 16px;
+  padding: 12px;
+  background-color: var(--color-secondary);
+  border-radius: 4px;
+}
+
+.parent-folders-section > label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.parent-folders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.parent-folder-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parent-folder-option input[type="radio"] {
+  cursor: pointer;
+}
+
+.parent-label {
+  font-size: 13px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.folder-name-input-section {
+  margin-top: 16px;
+}
+
+.folder-name-input-section > label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.folder-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.folder-name-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 13px;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.folder-name-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(33, 128, 141, 0.2);
+}
+
+.button-create-move {
+  padding: 8px 16px;
+  background-color: var(--color-primary);
+  color: var(--color-btn-primary-text);
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+}
+
+.button-create-move:hover {
+  background-color: var(--color-primary-hover);
+}
+
+.button-create-move:active {
+  background-color: var(--color-primary-active);
+}

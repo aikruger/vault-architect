@@ -47,26 +47,47 @@ export class VaultScanner {
     let folderCentroid: number[] | undefined = undefined;
     let hasValidCentroid = false;
 
+    // Add this at the START of the centroid calculation section
+    console.log(`[CENTROID] Calculating centroid for folder: ${folder.path}`);
+    console.log(`[CENTROID] Folder has ${files.length} notes`);
+
     if (this.settings.useSmartConnectionsIfAvailable && this.smartConnectionsService.isAvailable()) {
          coherenceScore = await this.smartConnectionsService.calculateCoherence(files);
 
          // Calculate folder centroid (average embedding)
+         console.log(`[CENTROID] Smart Connections available, proceeding with embedding collection...`);
         try {
             if (files.length > 0) {
                 const embeddings: number[][] = [];
+                let successCount = 0;
+                let failureCount = 0;
+
                 for (const noteFile of files) {
                     try {
+                        console.log(`[CENTROID] Getting embedding for: ${noteFile.name}`);
                         const embedding = await this.smartConnectionsService.getNoteEmbedding(noteFile);
-                        if (embedding && embedding.length > 0) {
+                        if (embedding && embedding.length > 0) { // Assuming length check is implicit or we add strict check 384 if needed but keeping generic for now
+                            console.log(`[CENTROID] ✓ Got embedding for ${noteFile.name}`);
                             embeddings.push(embedding);
+                            successCount++;
+                        } else {
+                            console.log(`[CENTROID] ✗ Invalid embedding for ${noteFile.name}:`,
+                                embedding ? `length ${embedding.length}` : 'null');
+                            failureCount++;
                         }
                     } catch (e) {
+                         // @ts-ignore
+                         console.log(`[CENTROID] ✗ Failed to get embedding for ${noteFile.name}:`, e.message);
+                         failureCount++;
                          continue;
                     }
                 }
 
+                console.log(`[CENTROID] Collected ${successCount} embeddings, ${failureCount} failures`);
+
                 if (embeddings.length > 0 && embeddings[0]) {
                     // Calculate centroid
+                    console.log(`[CENTROID] Calculating centroid from ${embeddings.length} embeddings...`);
                     const dim = embeddings[0].length;
                     const centroid = new Array(dim).fill(0);
                     for (let i = 0; i < dim; i++) {
@@ -77,11 +98,16 @@ export class VaultScanner {
                     }
                     folderCentroid = centroid;
                     hasValidCentroid = true;
+                    console.log(`[CENTROID] ✓ Centroid calculated for ${folder.path}`);
+                } else {
+                    console.log(`[CENTROID] ✗ No valid embeddings for ${folder.path}`);
                 }
             }
          } catch (error) {
              console.error('Error calculating centroid for ' + folder.path + ':', error);
          }
+    } else {
+        console.log(`[CENTROID] Smart Connections not available or disabled`);
     }
 
     const profile: FolderProfile = {

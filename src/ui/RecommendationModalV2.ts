@@ -62,6 +62,7 @@ export class RecommendationModalV2 extends Modal {
         .setButtonText('Get Recommendations')
         .setCta()
         .onClick(async () => {
+            console.log('[MODAL] User entered context:', this.userContext.substring(0, 50));
             await this.processAndShowRecommendations();
         });
 
@@ -86,12 +87,15 @@ export class RecommendationModalV2 extends Modal {
         this.vaultProfiles = vaultStructure;
 
         // Get recommendations (with optional embedding)
+        // When calling recommendFolder, PASS the user context
         this.recommendation = await this.plugin.llmCoordinator.recommendFolder(
             noteData,
             vaultStructure,
             this.userContext,
             this.currentFileEmbedding
         );
+
+        console.log('[MODAL] Received recommendations with context applied');
 
         this.phase = 'select';
         this.onOpen();
@@ -184,14 +188,24 @@ export class RecommendationModalV2 extends Modal {
 
   // FIX 3.4: Update Modal Display
   private renderRecommendation(containerEl: HTMLElement, rec: FolderRecommendation, isPrimary: boolean) {
-    const div = containerEl.createDiv({
-      cls: isPrimary ? 'recommendation-primary' : 'recommendation-alt'
-    });
+    // Using detailed structure from feedback
+    const recEl = containerEl.createDiv('recommendation-item');
+    if (isPrimary) recEl.addClass('recommendation-primary');
+    else recEl.addClass('recommendation-alt');
 
-    div.createEl('h4', { text: `📁 ${rec.folderName}` });
+    // Show full path prominently
+    const pathEl = recEl.createDiv('folder-path');
+    pathEl.createEl('strong', {text: rec.folderPath || rec.folderName});
+    console.log('[UI] Displaying recommendation:', rec.folderPath);
+
+    // Show folder name as secondary info if different from path
+    if (rec.folderPath !== rec.folderName && rec.folderName) {
+      const nameEl = recEl.createDiv('folder-name');
+      nameEl.textContent = '(' + rec.folderName + ')';
+    }
 
     // Scores Row (New)
-    const scoresRow = div.createDiv('scores-row');
+    const scoresRow = recEl.createDiv('scores-row');
 
     // Confidence
     const confidenceEl = scoresRow.createDiv('score-item');
@@ -222,87 +236,148 @@ export class RecommendationModalV2 extends Modal {
     }
 
     if (rec.reasoning) {
-        div.createEl('p', { text: `Reason: ${rec.reasoning}` });
+        const reasonEl = recEl.createDiv('reasoning');
+        reasonEl.textContent = rec.reasoning;
     }
 
-    const btn = new ButtonComponent(div)
-        .setButtonText('Select This Folder');
+    const buttonEl = recEl.createDiv('recommendation-buttons');
+    const btn = new ButtonComponent(buttonEl)
+        .setButtonText('Move Here');
 
     if (isPrimary) {
         btn.setCta();
     }
 
     btn.onClick(async () => {
+        console.log('[UI] Moving file to:', rec.folderPath);
         await this.moveFile(rec.folderPath);
     });
   }
 
   // FIX 2.3: renderCreateFolderSection helpers
   async generateAndShowFolderSuggestions(container: HTMLElement, file: TFile, userContext: string, topRecs: FolderRecommendation[]) {
+    console.log('[FOLDERCREATE] Generating folder suggestions...');
+
     try {
-      const suggestions = await this.plugin.llmCoordinator.generateFolderNames(
-        file,
-        userContext,
-        topRecs
-      );
+        const suggestion = await this.plugin.llmCoordinator.generateFolderNames(
+            file,
+            userContext,
+            topRecs
+        );
 
-      container.empty();
+        console.log('[FOLDERCREATE] Suggestion received:', suggestion.primaryName);
 
-      suggestions.forEach((suggestion, index) => {
-        const suggestionItem = container.createDiv('folder-suggestion-item');
+        container.empty();
 
-        // Mark first as recommended
-        if (index === 0) {
-          suggestionItem.createEl('div', { cls: 'recommended-badge', text: 'Recommended' });
+        // Show reasoning
+        if (suggestion.reasoning) {
+            const reasonEl = container.createDiv('folder-suggestion-reasoning');
+            reasonEl.textContent = '💡 ' + suggestion.reasoning;
+        }
+
+        // Show suggested parent folders
+        // @ts-ignore
+        if (suggestion.suggestedParentFolders && suggestion.suggestedParentFolders.length > 0) {
+            const parentSection = container.createDiv('parent-folders-section');
+            parentSection.createEl('label', { text: 'Suggested parent folders:' });
+
+            const parentList = parentSection.createDiv('parent-folders-list');
+            // @ts-ignore
+            suggestion.suggestedParentFolders.forEach((parentPath: string, index: number) => {
+                const parentItem = parentList.createDiv('parent-folder-option');
+                const radio = parentItem.createEl('input', {
+                    type: 'radio',
+                    // @ts-ignore
+                    name: 'parent-folder',
+                    value: parentPath
+                });
+                radio.id = 'parent-' + index;
+                parentItem.createEl('label', {
+                    text: parentPath,
+                    cls: 'parent-label'
+                }).setAttribute('for', 'parent-' + index);
+            });
+
+            // Also add option for root
+            const rootItem = parentList.createDiv('parent-folder-option');
+            const rootRadio = rootItem.createEl('input', {
+                type: 'radio',
+                // @ts-ignore
+                name: 'parent-folder',
+                value: '',
+                checked: true // Defaults to root if none selected by user override logic, or maybe should be explicit. Feedback had checked: true.
+            });
+            rootRadio.id = 'parent-root';
+            rootItem.createEl('label', {
+                text: 'Vault root',
+                cls: 'parent-label'
+            }).setAttribute('for', 'parent-root');
         }
 
         // Input for folder name
-        const inputContainer = suggestionItem.createDiv('folder-suggestion-input-row');
-        const input = inputContainer.createEl('input', {
-          type: 'text',
-          cls: 'folder-suggestion-input',
-          value: suggestion
+        const inputSection = container.createDiv('folder-name-input-section');
+        inputSection.createEl('label', { text: 'Folder name:' });
+
+        const inputRow = inputSection.createDiv('folder-input-row');
+        const input = inputRow.createEl('input', {
+            type: 'text',
+            cls: 'folder-name-input',
+            value: suggestion.primaryName
         });
         input.placeholder = 'Folder name';
 
         // Create & Move button
-        const button = inputContainer.createEl('button', {
-          text: 'Create & Move',
-          cls: 'button-create-move'
+        const button = inputRow.createEl('button', {
+            text: 'Create & Move',
+            cls: 'button-create-move'
         });
 
         button.onclick = async () => {
-          const folderName = input.value.trim();
-          if (!folderName) {
-            alert('Please enter a folder name');
-            return;
-          }
-
-          try {
-            const success = await this.plugin.createFolderAndMove(
-              folderName,
-              file
-            );
-
-            if (success) {
-              this.close();
-              new Notice(`File moved to new folder: ${folderName}`);
-            } else {
-              alert('Failed to create folder or move file');
+            const folderName = input.value.trim();
+            if (!folderName) {
+                alert('Please enter a folder name');
+                return;
             }
-          } catch (error) {
-            console.error('Error creating folder:', error);
+
+            // Get selected parent folder
+            const parentRadios = container.querySelectorAll('input[name="parent-folder"]');
+            let parentPath = '';
             // @ts-ignore
-            alert('Error: ' + error.message);
-          }
+            for (const radio of parentRadios) {
+                // @ts-ignore
+                if (radio.checked) {
+                    // @ts-ignore
+                    parentPath = radio.value;
+                    break;
+                }
+            }
+
+            // Build full path
+            const fullPath = parentPath ? parentPath + '/' + folderName : folderName;
+
+            console.log('[FOLDERCREATE] Creating folder at:', fullPath);
+
+            try {
+                const success = await this.plugin.createFolderAndMove(fullPath, this.currentFile);
+                if (success) {
+                    this.close();
+                    new Notice(`File moved to: ${fullPath}`);
+                } else {
+                    alert('Failed to create folder or move file');
+                }
+            } catch (error) {
+                console.error('[FOLDERCREATE] Error:', error);
+                // @ts-ignore
+                alert('Error: ' + error.message);
+            }
         };
-      });
 
     } catch (error) {
-      console.error('Error generating suggestions:', error);
-      const errorEl = container.createEl('p');
-      errorEl.textContent = 'Failed to generate suggestions';
-      errorEl.style.color = 'var(--color-error)';
+        console.error('[FOLDERCREATE] Error generating suggestions:', error);
+        const errorEl = container.createEl('p');
+        // @ts-ignore
+        errorEl.textContent = '⚠️ Failed to generate suggestions: ' + error.message;
+        errorEl.style.color = 'var(--color-error)';
     }
   }
 

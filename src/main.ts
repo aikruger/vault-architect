@@ -157,6 +157,7 @@ export default class VaultArchitectPlugin extends Plugin {
       try {
         // @ts-ignore
         modal.currentFileEmbedding = await this.smartConnectionsService.getNoteEmbedding(activeFile);
+        console.log('[RECOMMEND] Got current file embedding');
       } catch (e) {
         console.warn('Could not get file embedding:', e);
       }
@@ -346,37 +347,47 @@ export default class VaultArchitectPlugin extends Plugin {
     this.smartConnectionsService = new SmartConnectionsService(this.app);
   }
 
-  async createFolderAndMove(folderName: string, file: TFile): Promise<boolean> {
+  async createFolderAndMove(fullFolderPath: string, file: TFile): Promise<boolean> {
+    console.log('[MOVE] Moving file to:', fullFolderPath);
+
     try {
-      // Sanitize folder name
-      const sanitized = folderName
-        .replace(/[<>:"|?*]/g, '')  // Remove invalid chars
-        .trim();
+      // Sanitize path
+      const sanitized = fullFolderPath
+        .split('/')
+        .map(part => part.replace(/[<>:"|?*]/g, '').trim())
+        .filter(part => part.length > 0)
+        .join('/');
 
       if (!sanitized) {
-        throw new Error('Invalid folder name');
+        throw new Error('Invalid folder path');
       }
 
-      // Check if folder already exists
-      const existingFolder = this.app.vault.getAbstractFileByPath(sanitized);
-      if (existingFolder && existingFolder instanceof TFolder) {
-        // Use existing folder
-        const newPath = `${sanitized}/${file.name}`;
-        await this.app.fileManager.renameFile(file, newPath);
-        return true;
+      console.log('[MOVE] Sanitized path:', sanitized);
+
+      // Check if folder exists
+      let targetFolder = this.app.vault.getAbstractFileByPath(sanitized);
+
+      if (targetFolder && targetFolder instanceof TFolder) {
+        console.log('[MOVE] Folder already exists, using existing folder');
+      } else {
+        console.log('[MOVE] Creating new folder structure...');
+
+        // Create folder (Obsidian API creates parent folders automatically)
+        targetFolder = await this.app.vault.createFolder(sanitized);
+        console.log('[MOVE] ✓ Folder created:', sanitized);
       }
 
-      // Create new folder
-      await this.app.vault.createFolder(sanitized);
+      // Move file to folder
+      const newPath = sanitized + '/' + file.name;
+      console.log('[MOVE] Moving file to:', newPath);
 
-      // Move file to new folder
-      const newPath = `${sanitized}/${file.name}`;
       await this.app.fileManager.renameFile(file, newPath);
+      console.log('[MOVE] ✓ File moved successfully');
 
       return true;
 
     } catch (error) {
-      console.error('Error creating folder and moving file:', error);
+      console.error('[MOVE] Error:', error);
       throw error;
     }
   }
