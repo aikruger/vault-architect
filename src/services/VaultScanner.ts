@@ -44,8 +44,33 @@ export class VaultScanner {
 
     // Create folder profile
     let coherenceScore = 0.7;
-    if (this.settings.useSmartConnectionsIfAvailable && this.smartConnectionsService.isAvailable()) {
+    let folderCentroid: number[] | undefined = undefined;
+    let hasValidCentroid = false;
+
+    // Add this at the START of the centroid calculation section
+    console.log(`[CENTROID] Calculating centroid for folder: ${folder.path}`);
+    console.log(`[CENTROID] Folder has ${files.length} notes`);
+
+    if (this.settings.useSmartConnectionsIfAvailable && this.smartConnectionsService.isSmartConnectionsAvailable()) {
          coherenceScore = await this.smartConnectionsService.calculateCoherence(files);
+
+         // Calculate folder centroid (average embedding)
+         console.log(`[CENTROID] Smart Connections available, calculating centroid...`);
+         try {
+             // @ts-ignore
+             const centroid = await this.smartConnectionsService.calculateFolderCentroid(folder, files);
+             if (centroid) {
+                 folderCentroid = centroid;
+                 hasValidCentroid = true;
+                 console.log(`[CENTROID] ✓ Centroid calculated for ${folder.path}`);
+             } else {
+                 console.log(`[CENTROID] ✗ No valid centroid for ${folder.path}`);
+             }
+         } catch (error) {
+             console.error('Error calculating centroid for ' + folder.path + ':', error);
+         }
+    } else {
+        console.log(`[CENTROID] Smart Connections not available or disabled`);
     }
 
     const profile: FolderProfile = {
@@ -57,6 +82,8 @@ export class VaultScanner {
       description: folderNote?.description || this.generateDescription(folder, files),
       folderNote,
       coherenceScore: coherenceScore,
+      folderCentroid: folderCentroid,
+      hasValidCentroid: hasValidCentroid,
       examples: files.slice(0, 3).map(f => f.basename)
     };
 
